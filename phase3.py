@@ -2,6 +2,7 @@ import ir_algorithms
 
 file_name = 'data\\IR00_3_11k News.xlsx'
 num_clusters = 20
+num_inits = 10
 
 def main():
     while(True):
@@ -18,7 +19,7 @@ def main():
             ir_system.process_query(query)
         elif option == '3':
             ir_system.load_inverted_index()
-            ir_system.cluster(num_clusters)
+            ir_system.cluster(num_clusters, num_inits)
         print('\ndone\n')
 
 

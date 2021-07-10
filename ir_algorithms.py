@@ -1,5 +1,5 @@
 import openpyxl # for reading excel files
-import re, regex, pickle, numpy as np
+import re, regex, pickle, numpy as np, copy
 import heapq, math, random
 
 frequent_terms_num = 20 # removing # of most frequent terms from dictionary
@@ -656,18 +656,83 @@ class IR:
         return best_ind
 
 
+    # calculate centroid for a given cluster
+    def calculate_centroid(self, cluster):
+        centroid = dict()
+        for vec in cluster.values():
+            for term, weight in vec.items():
+                if term in centroid:
+                    centroid[term] += weight
+                else:
+                    centroid[term] = weight
+        centroid = {k: v / len(cluster) for k, v in centroid.items()}
+        # normalizing centroid
+        centroid_len = sum([w**2 for w in centroid.values()])
+        centroid_len = math.sqrt(centroid_len)
+        centroid = {k: v / centroid_len for k, v in centroid.items()}
+        return centroid
+
+    
+    # checking if clustering has been converged 
+    def clustering_converged(self, old_centroids, new_centroids, conv_lim):
+        min_sim = 1
+        for i in range(len(old_centroids)):
+            sim = self.cosine_score(old_centroids[i], new_centroids[i])
+            if sim < min_sim:
+                min_sim = sim
+        if min_sim < conv_lim:
+            print('similarity between old and new centroids:', min_sim)
+            return False
+        print('Converged!')
+        return True
+
+    # calculating rss in terms of cosine similarity (the higher -> the better!)
+    def calculate_cosine_rss(self, clusters, centroids):
+        rss = 0
+        for i in range(len(clusters)):
+            for vec in clusters[i]:
+                rss += self.cosine_score(vec, centroids[i])
+        return rss
+
+
     # building clusters using k-means algorithm
-    def cluster(self, k):
-        max_iter = 1000
+    def run_kmeans(self, k):
+        conv_lim = 0.999
+        max_iter = 100
         seeds_inds = random.sample(range(1, len(self.docs_vectors) + 1), k)
         centroids = [self.docs_vectors[ind] for ind in seeds_inds]
+        old_centroids = None
         clusters = [dict() for i in range(k)]
+        labels = dict()
         for iter in range(max_iter):
             for i in range(1, len(self.docs_vectors) + 1):
                 vec = self.docs_vectors[i]
                 label = self.find_best_centroid(vec, centroids)
+                labels[i] = label
                 clusters[label][i] = vec
-            print('{} out of {}'.format(iter, max_iter))
-        
-    
-        
+            # updating centroids
+            old_centroids = copy.deepcopy(centroids)
+            for i in range(len(centroids)):
+                centroids[i] = self.calculate_centroid(clusters[i])
+            # checking convergence
+            if self.clustering_converged(old_centroids, centroids, conv_lim):
+                break
+            print('Iteration:', iter)
+            return clusters, centroids, labels
+
+
+    # running k-means with different initial seeds so as to choose the best clustering
+    def cluster(self, num_clusters, num_inits):
+        best_clusters = None
+        best_centroids = None
+        best_labels = None
+        best_cosine_rss = None
+        for i in range(num_inits):
+            clusters, centroids, labels = self.run_kmeans(num_clusters)
+            print('Ran k-means for {} out of {} times'.format(i+1, num_inits))
+            print('Calculating Cosine-RSS')
+            cosine_rss = self.calculate_cosine_rss(clusters, centroids)
+            print('Cosine-RSS:', cosine_rss)
+            if best_cosine_rss == None or best_cosine_rss < cosine_rss:
+                best_cosine_rss = cosine_rss
+                best_clusters, best_centroids, best_labels = clusters, centroids, labels
