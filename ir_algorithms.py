@@ -1,8 +1,8 @@
 import openpyxl # for reading excel files
 import re, regex, pickle, numpy as np
-import heapq, math
+import heapq, math, random
 
-frequent_terms_num = 2 # removing # of most frequent terms from dictionary
+frequent_terms_num = 20 # removing # of most frequent terms from dictionary
 max_results_num = 20 # maximum number of results to show
 champions_list_size = 100
 
@@ -40,11 +40,17 @@ def print_progress_bar (iteration, total, prefix = '', suffix = '', decimals = 1
         print()
 
 class Document:
-    def __init__(self, doc_id, content, url) -> None:
+    def __init__(self, doc_id, content, topic, url) -> None:
         self.doc_id = doc_id
         self.content = content
+        self.topic = topic
         self.url = url
 
+    def __str__(self) -> str:
+        return 'doc_id: ' + str(self.doc_id) + '\ttopic: ' + str(self.topic) + '\turl: ' + str(self.url)
+
+    def __repr__(self) -> str:
+        return str(self)
 
 class Posting:
     def __init__(self, doc_id, freq) -> None:
@@ -85,6 +91,7 @@ class IR:
         self.docs_dict = dict()
         self.arabic_plurals_dict = dict()
         self.verbs_dict = dict()
+        self.docs_vectors = dict()
 
     
     # building the inverted index
@@ -113,6 +120,10 @@ class IR:
         print('Building Champions Lists...')
         self.build_champions_lists()
         print('Champions Lists have been built!')
+        # building document vectors representations
+        print('Building vector-space representations of documents...')
+        self.build_doc_vectors()
+        print('Vector-space representations of documents have been built!')
         # saving the dictionary
         with open('data\\index.pickle', 'wb') as handle:
             pickle.dump(self.dictionary, handle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -122,6 +133,8 @@ class IR:
             pickle.dump(self.arabic_plurals_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
         with open('data\\verbs_stems_dict.pickle', 'wb') as handle:
             pickle.dump(self.verbs_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        with open('data\\docs_vectors.pickle', 'wb') as handle:
+            pickle.dump(self.docs_vectors, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
     # building a dictionary mapping documents IDs to URL
@@ -141,6 +154,8 @@ class IR:
             self.arabic_plurals_dict = pickle.load(handle)
         with open('data\\verbs_stems_dict.pickle', 'rb') as handle:
             self.verbs_dict = pickle.load(handle)
+        with open('data\\docs_vectors.pickle', 'rb') as handle:
+            self.docs_vectors = pickle.load(handle)
 
 
 
@@ -156,7 +171,7 @@ class IR:
                 for header in row:
                     headers.append(header)
             else:
-                document = Document(row[0], row[1], row[2])
+                document = Document(row[0], row[1], row[2], row[3])
                 dataset.append(document)
         self.documents = dataset
         print('Initialized Excel file')
@@ -580,5 +595,79 @@ class IR:
                 verb_root = line.split()[0]
                 tenses = self.generate_verb_tenses(verb_root)
                 for tense in tenses:
-                    self.verbs_dict[tense] = verb_root             
+                    self.verbs_dict[tense] = verb_root         
+
+
+    # represent document content as a vector
+    def get_doc_vec(self, content):
+        tokens = self.get_tokens(content)
+        temp_terms = list(set(tokens))
+        terms = []
+        for term in temp_terms:
+            if term in self.dictionary:
+                terms.append(term)
+        terms_freqs = [tokens.count(term) for term in terms]
+        terms_weights = []
+        # calculating query-terms weights
+        for i in range(len(terms)):
+            term = terms[i]
+            term_freq = terms_freqs[i]
+            doc_freq = self.dictionary[term].term_freq
+            weight = self.calculate_tf_idf(term_freq, doc_freq, len(self.docs_dict))
+            terms_weights.append(weight)
+        # normalizing query weights
+        doc_len = sum([weight**2 for weight in terms_weights])
+        doc_len = math.sqrt(doc_len)
+        terms_norm_weights = [weight/doc_len for weight in terms_weights]
+        doc_vec = dict(zip(terms, terms_norm_weights))
+        return doc_vec
+
+    # Building vector-space representations of documents
+    def build_doc_vectors(self):
+        indexed_num = 0
+        for doc in self.documents:
+            vec = self.get_doc_vec(doc.content)
+            self.docs_vectors[doc.doc_id] = vec
+            indexed_num += 1
+            print_progress_bar(indexed_num/len(self.documents), 1, prefix = 'Progress:', suffix = 'Complete', length = 50)
+
+    
+    # calculating cosine-similarity between two document vectors
+    def cosine_score(self, vec1, vec2):
+        score = 0
+        base_vec, addit_vec = vec1, vec2
+        if len(vec1) > len(vec2):
+            base_vec, addit_vec = vec2, vec1
+        for term in base_vec.keys():
+            if term in addit_vec:
+                score += base_vec[term] * addit_vec[term]
+        return score
+
+    
+    # fiding best (= nearest) centroid for a document
+    def find_best_centroid(self, vec, centroids):
+        best_ind = 0
+        best_score = 0
+        for i in range(len(centroids)):
+            score = self.cosine_score(vec, centroids[i])
+            if score > best_score:
+                best_score = score
+                best_ind = i
+        return best_ind
+
+
+    # building clusters using k-means algorithm
+    def cluster(self, k):
+        max_iter = 1000
+        seeds_inds = random.sample(range(1, len(self.docs_vectors) + 1), k)
+        centroids = [self.docs_vectors[ind] for ind in seeds_inds]
+        clusters = [dict() for i in range(k)]
+        for iter in range(max_iter):
+            for i in range(1, len(self.docs_vectors) + 1):
+                vec = self.docs_vectors[i]
+                label = self.find_best_centroid(vec, centroids)
+                clusters[label][i] = vec
+            print('{} out of {}'.format(iter, max_iter))
+        
+    
         
