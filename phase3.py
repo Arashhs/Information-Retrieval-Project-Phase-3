@@ -13,6 +13,8 @@ def main():
         print('3: Run k-means and build clusters')
         print('4: Run queries using clustering technique')
         print('5: Build classification model and classify unlabeled docs')
+        print('6: Build train and test vectors from excel files')
+        print('7: Run queries using classification technique')
         option = input('Select option: ')
         ir_system = ir_algorithms.IR()
         if option == '1':
@@ -31,7 +33,14 @@ def main():
             ir_system.process_query_using_clustering(query, b2_param)
         elif option == '5':
             ir_system.load_inverted_index()
-            ir_system.classify(file_name, unlabeled_dataset)
+            ir_system.classify()
+        elif option == '6':
+            ir_system.load_inverted_index()
+            ir_system.build_classification_vectors(file_name, unlabeled_dataset)
+        elif option == '7':
+            ir_system.load_inverted_index()
+            query = input("Enter your query: ")
+            ir_system.process_query_using_classification(query)
         print('\ndone\n')
 
 

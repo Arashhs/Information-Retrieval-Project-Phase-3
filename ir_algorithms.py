@@ -1,6 +1,7 @@
 import openpyxl # for reading excel files
 import re, regex, pickle, numpy as np, copy
 import heapq, math, random
+from sklearn.model_selection import KFold # used for k-fold cross-validation
 
 frequent_terms_num = 20 # removing # of most frequent terms from dictionary
 max_results_num = 20 # maximum number of results to show
@@ -840,23 +841,146 @@ class IR:
         test_topic = self.knn_top_topic(scores, k)
         return test_topic
 
+    
+    # calculate the accuracy of the predicted labels
+    def calculate_accuracy(self, real_labels, predicted_labels):
+        corrects = 0
+        for i in range(len(real_labels)):
+            if real_labels[i] == predicted_labels[i]:
+                corrects += 1
+        return corrects/len(real_labels)
+
+
+
+    # evaluate KNN performance on the given test data
+    def evaluate_knn(self, train_data, test_data, k_param):
+        predicted_labels = []
+        real_labels = []
+        for test_doc in test_data.items():
+            test_id, test_vec, test_label = test_doc[0], test_doc[1][0], test_doc[1][1]
+            predicted = self.run_knn(train_data, test_vec, k_param)
+            predicted_labels.append(predicted)
+            real_labels.append(test_label)
+        accuracy = self.calculate_accuracy(real_labels, predicted_labels)
+        return accuracy
+    
+    # finding best K for KNN using k-fold cross-validation
+    def cv_best_k(self, dataset, min_k, max_k):
+        sample_size = 1000
+        keys = random.sample(list(dataset), sample_size)
+        values = [dataset[k] for k in keys]
+        dataset = dict(zip(keys, values))
+        num_folds = 10
+        kf10 = KFold(num_folds, shuffle=True)
+        dataset_keys = list(dataset.keys())
+        mean_accuracies = dict()
+        # initializing all accuracies to zero
+        for k_param in range(min_k, max_k + 1, 2):
+            mean_accuracies[k_param] = 0
+        processed = 0
+        for train_indices, test_indices in kf10.split(dataset_keys):
+            train_doc_ids = [dataset_keys[k] for k in train_indices]
+            test_doc_ids = [dataset_keys[k] for k in test_indices]
+            train_data = {k: dataset[k] for k in train_doc_ids}
+            test_data = {k: dataset[k] for k in test_doc_ids}
+            for k_param in range(min_k, max_k + 1, 2):
+                calculated_accuracy = self.evaluate_knn(train_data, test_data, k_param)
+                mean_accuracies[k_param] += calculated_accuracy
+            processed += 1
+            print_progress_bar(processed/num_folds, 1, prefix = 'Progress:', suffix = 'Complete', length = 50)
+        # normalizing all accuracies to zero
+        for k_param in range(min_k, max_k + 1, 2):
+            mean_accuracies[k_param] /= num_folds
+        best_tup = max(mean_accuracies.items(), key=lambda v: v[1])
+        best_k, best_accuracy = best_tup[0], best_tup[1]
+        print('Found best k: {}\tAccuracy: {}'.format(best_k, best_accuracy))
+        return best_k
+
 
     # classifying unlabeled documents by running KNN several times and choosing best k
-    def classify(self, train_dataset_file, test_dataset_file):
-        '''train_dataset = self.fetch_documents(train_dataset_file, trainset=True)
+    def classify(self):
+        min_k = 3
+        max_k = 19
+        train_docs_vects, test_docs_vects = self.load_classification_vectors()
+        print('Running 10-fold cross validation...')
+        best_k = self.cv_best_k(train_docs_vects, min_k, max_k)
+        print('Classifying unlabeled documents...')
+        processed = 0
+        total_len = len(test_docs_vects.items())
+        for test_tup in test_docs_vects.items():
+            test_doc_id, test_doc_vec = test_tup[0], test_tup[1][0]
+            knn_topic = self.run_knn(train_docs_vects, test_doc_vec, best_k)
+            test_tup[1][1] = knn_topic
+            print_progress_bar(processed/total_len, 1, prefix = 'Progress:', suffix = 'Complete', length = 50)
+            processed += 1
+        self.store_classified_data(test_docs_vects)
+        
+
+    # build train and test document vectors for classification
+    def build_classification_vectors(self, train_dataset_file, test_dataset_file):
+        train_dataset = self.fetch_documents(train_dataset_file, trainset=True)
         test_dataset = self.fetch_documents(test_dataset_file, trainset=False)
         train_docs_vects = self.build_labeled_doc_vectors(train_dataset)
         test_docs_vects = self.build_labeled_doc_vectors(test_dataset)
         with open('data\\classification_train_data.pickle', 'wb') as handle:
             pickle.dump(train_docs_vects, handle, protocol=pickle.HIGHEST_PROTOCOL)
         with open('data\\classification_test_data.pickle', 'wb') as handle:
-            pickle.dump(test_docs_vects, handle, protocol=pickle.HIGHEST_PROTOCOL)'''
+            pickle.dump(test_docs_vects, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    
+    # load classification datasets' vectors
+    def load_classification_vectors(self):
         with open('data\\classification_train_data.pickle', 'rb') as handle:
             train_docs_vects = pickle.load(handle)
         with open('data\\classification_test_data.pickle', 'rb') as handle:
             test_docs_vects = pickle.load(handle)
-        for test_tup in test_docs_vects.items():
-            test_doc_id, test_doc_vec = test_tup[0], test_tup[1][0]
-            knn_topic = self.run_knn(train_docs_vects, test_doc_vec, 5)
-            test_tup[1][1] = knn_topic
+        return train_docs_vects, test_docs_vects
+    
+
+    # store classified dataset
+    def store_classified_data(self, classified_dataset):
+        with open('data\\classified_dataset.pickle', 'wb') as handle:
+            pickle.dump(classified_dataset, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    
+    # load classified dataset
+    def load_classified_dataset(self):
+        with open('data\\classified_dataset.pickle', 'rb') as handle:
+            dataset = pickle.load(handle)
+        classified_dataset = dict()
+        topics = []
+        for doc in dataset.items():
+            doc_id, doc_vec, doc_topic = doc[0], doc[1][0], doc[1][1]
+            if doc_topic not in topics:
+                topics.append(doc_topic)
+                topic_dataset = dict()
+                topic_dataset[doc_id] = doc_vec
+                classified_dataset[doc_topic] = topic_dataset
+            else:
+                classified_dataset[doc_topic][doc_id] = doc_vec
+        return classified_dataset
+
+
+    # processing queries using clusters
+    def process_query_using_classification(self, query):
+        topic = re.findall(r'cat:[a-zA-Z]+', query)
+        if len(topic) > 0:
+            topic = topic[0].replace('cat:', '')
+        else:
+            topic = None
+        classified_dataset = self.load_classified_dataset()
+        if topic in classified_dataset.keys():
+            topic_docs = classified_dataset[topic]
+        else:
+            print('Topic does not exist!')
+            return
+        query_vec = self.get_doc_vec(query)
+        cosine_scores = dict()
+        # comparing query to the documents of the same topic
+        for doc_id, doc_vec in topic_docs.items():
+            score = self.cosine_score(query_vec, doc_vec)
+            cosine_scores[doc_id] = score
+        top_k = self.retrieve_top_k(cosine_scores, max_results_num)
+        self.show_results(top_k)
+        return top_k
         
