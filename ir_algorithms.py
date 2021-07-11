@@ -92,6 +92,9 @@ class IR:
         self.arabic_plurals_dict = dict()
         self.verbs_dict = dict()
         self.docs_vectors = dict()
+        self.clusters = None
+        self.cluster_centroids = None
+        self.train_docs_vector = dict()
 
     
     # building the inverted index
@@ -157,6 +160,14 @@ class IR:
         with open('data\\docs_vectors.pickle', 'rb') as handle:
             self.docs_vectors = pickle.load(handle)
 
+    
+    # loading existing clustering data from file
+    def load_cluster_data(self):
+        with open('data\\clusters.pickle', 'rb') as handle:
+            self.clusters = pickle.load(handle)
+        with open('data\\cluster_centroids.pickle', 'rb') as handle:
+            self.cluster_centroids = pickle.load(handle)
+
 
 
     # initializing documents list by reading the excel dataset
@@ -175,6 +186,27 @@ class IR:
                 dataset.append(document)
         self.documents = dataset
         print('Initialized Excel file')
+
+    
+    # initializing documents list by reading the excel dataset
+    def fetch_documents(self, file_name, trainset=True):
+        print('Fetching documents using Excel file...')
+        wb_obj = openpyxl.load_workbook(file_name)
+        sheet = wb_obj.active
+        headers = []
+        dataset = []
+        for i, row in enumerate(sheet.iter_rows(values_only=True)):
+            if i == 0:
+                for header in row:
+                    headers.append(header)
+            else:
+                if trainset:
+                    document = Document(row[0], row[1], row[2], row[3])
+                else:
+                    document = Document(row[0], row[1], None, row[2])
+                dataset.append(document)
+        print('Fetched all documents')
+        return dataset
 
 
     # processing the documents one by one for building the index
@@ -303,6 +335,32 @@ class IR:
             self.process_query_mult_words(tokens)
         else:
             print('Query is not valid; please make sure your query contains words.')
+
+    
+    # processing queries using clusters
+    def process_query_using_clustering(self, query, b2_param):
+        clusters = self.clusters
+        centroids = self.cluster_centroids
+        query_vec = self.get_doc_vec(query)
+        sim_to_centroids = []
+        # comparing query to cluster centroids
+        for i in range(len(centroids)):
+            sim_to_centroids.append((i, self.cosine_score(query_vec, centroids[i])))
+        best_centroids = heapq.nlargest(b2_param, sim_to_centroids, key=lambda p: p[1])
+        best_centroids_inds = [v[0] for v in best_centroids]
+        cosine_scores = dict()
+        # comparing query to the documents of most similar clusters
+        for i in range(b2_param):
+            cluster = clusters[best_centroids_inds[i]]
+            for doc_id, doc_vec in cluster.items():
+                score = self.cosine_score(query_vec, doc_vec)
+                cosine_scores[doc_id] = score
+        top_k = self.retrieve_top_k(cosine_scores, max_results_num)
+        self.show_results(top_k)
+        return top_k
+        
+        
+
     
 
     # processing queries with only one word
@@ -632,6 +690,19 @@ class IR:
             print_progress_bar(indexed_num/len(self.documents), 1, prefix = 'Progress:', suffix = 'Complete', length = 50)
 
     
+    # Building vector-space representations of train documents
+    def build_labeled_doc_vectors(self, dataset):
+        indexed_num = 0
+        docs_vectors = dict()
+        for doc in dataset:
+            vec = self.get_doc_vec(doc.content)
+            docs_vectors[doc.doc_id] = [vec, doc.topic]
+            indexed_num += 1
+            print_progress_bar(indexed_num/len(dataset), 1, prefix = 'Progress:', suffix = 'Complete', length = 50)
+        return docs_vectors
+        
+
+    
     # calculating cosine-similarity between two document vectors
     def cosine_score(self, vec1, vec2):
         score = 0
@@ -683,6 +754,7 @@ class IR:
         if min_sim < conv_lim:
             print('similarity between old and new centroids:', min_sim)
             return False
+        print('similarity between old and new centroids:', min_sim)
         print('Converged!')
         return True
 
@@ -690,14 +762,14 @@ class IR:
     def calculate_cosine_rss(self, clusters, centroids):
         rss = 0
         for i in range(len(clusters)):
-            for vec in clusters[i]:
+            for vec in clusters[i].values():
                 rss += self.cosine_score(vec, centroids[i])
         return rss
 
 
     # building clusters using k-means algorithm
     def run_kmeans(self, k):
-        conv_lim = 0.999
+        conv_lim = 0.98
         max_iter = 100
         seeds_inds = random.sample(range(1, len(self.docs_vectors) + 1), k)
         centroids = [self.docs_vectors[ind] for ind in seeds_inds]
@@ -718,7 +790,7 @@ class IR:
             if self.clustering_converged(old_centroids, centroids, conv_lim):
                 break
             print('Iteration:', iter)
-            return clusters, centroids, labels
+        return clusters, centroids, labels
 
 
     # running k-means with different initial seeds so as to choose the best clustering
@@ -736,3 +808,47 @@ class IR:
             if best_cosine_rss == None or best_cosine_rss < cosine_rss:
                 best_cosine_rss = cosine_rss
                 best_clusters, best_centroids, best_labels = clusters, centroids, labels
+        self.clusters = best_clusters
+        self.cluster_centroids = best_centroids
+        with open('data\\clusters.pickle', 'wb') as handle:
+            pickle.dump(best_clusters, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        with open('data\\cluster_centroids.pickle', 'wb') as handle:
+            pickle.dump(best_centroids, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    # fiding k nearest neighbors and returning the prominent label
+    def knn_top_topic(self, scores, k):
+        k_nearest = heapq.nlargest(k, scores, key=lambda p: p[1][0])
+        print('eh')
+
+
+
+
+    # classifying unlabeled documents using KNN
+    def run_knn(self, train_dataset, test_doc_vec, k):
+        scores = dict()
+        # comparing test vector to every train vector
+        for item in train_dataset.items():
+            doc_id, doc_vec, doc_label = item[0], item[1][0], item[1][1]
+            score = self.cosine_score(test_doc_vec, doc_vec)
+            scores[doc_id] = [score, label]
+        test_topic = self.knn_top_topic(scores, k)
+
+
+    # classifying unlabeled documents by running KNN several times and choosing best k
+    def classify(self, train_dataset_file, test_dataset_file):
+        train_dataset = self.fetch_documents(train_dataset_file, trainset=True)
+        test_dataset = self.fetch_documents(test_dataset_file, trainset=False)
+        train_docs_vects = self.build_labeled_doc_vectors(train_dataset)
+        test_docs_vects = self.build_labeled_doc_vectors(test_dataset)
+        with open('data\\classification_train_data.pickle', 'wb') as handle:
+            pickle.dump(train_docs_vects, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        with open('data\\classification_test_data.pickle', 'wb') as handle:
+            pickle.dump(test_docs_vects, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        '''with open('data\\classification_train_data.pickle', 'rb') as handle:
+            train_docs_vects = pickle.load(handle)
+        with open('data\\classification_test_data.pickle', 'rb') as handle:
+            test_docs_vects = pickle.load(handle)'''
+        for test_tup in test_docs_vects.items():
+            test_doc_id, test_doc_vec = test_tup[0], test_tup[1]
+            self.run_knn(train_docs_vects, test_doc_vec, 5)
+        
