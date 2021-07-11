@@ -817,8 +817,14 @@ class IR:
 
     # fiding k nearest neighbors and returning the prominent label
     def knn_top_topic(self, scores, k):
-        k_nearest = heapq.nlargest(k, scores, key=lambda p: p[1][0])
-        print('eh')
+        k_nearest = heapq.nlargest(k, scores.items(), key=lambda p: p[1][0])
+        topics = [v[1][1] for v in k_nearest]
+        unique_topics = list(set(topics))
+        topic_freqs = [topics.count(t) for t in unique_topics]
+        max_freq = max(topic_freqs)
+        most_freq_topic = unique_topics[topic_freqs.index(max_freq)]
+        return most_freq_topic
+
 
 
 
@@ -830,25 +836,27 @@ class IR:
         for item in train_dataset.items():
             doc_id, doc_vec, doc_label = item[0], item[1][0], item[1][1]
             score = self.cosine_score(test_doc_vec, doc_vec)
-            scores[doc_id] = [score, label]
+            scores[doc_id] = [score, doc_label]
         test_topic = self.knn_top_topic(scores, k)
+        return test_topic
 
 
     # classifying unlabeled documents by running KNN several times and choosing best k
     def classify(self, train_dataset_file, test_dataset_file):
-        train_dataset = self.fetch_documents(train_dataset_file, trainset=True)
+        '''train_dataset = self.fetch_documents(train_dataset_file, trainset=True)
         test_dataset = self.fetch_documents(test_dataset_file, trainset=False)
         train_docs_vects = self.build_labeled_doc_vectors(train_dataset)
         test_docs_vects = self.build_labeled_doc_vectors(test_dataset)
         with open('data\\classification_train_data.pickle', 'wb') as handle:
             pickle.dump(train_docs_vects, handle, protocol=pickle.HIGHEST_PROTOCOL)
         with open('data\\classification_test_data.pickle', 'wb') as handle:
-            pickle.dump(test_docs_vects, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        '''with open('data\\classification_train_data.pickle', 'rb') as handle:
+            pickle.dump(test_docs_vects, handle, protocol=pickle.HIGHEST_PROTOCOL)'''
+        with open('data\\classification_train_data.pickle', 'rb') as handle:
             train_docs_vects = pickle.load(handle)
         with open('data\\classification_test_data.pickle', 'rb') as handle:
-            test_docs_vects = pickle.load(handle)'''
+            test_docs_vects = pickle.load(handle)
         for test_tup in test_docs_vects.items():
-            test_doc_id, test_doc_vec = test_tup[0], test_tup[1]
-            self.run_knn(train_docs_vects, test_doc_vec, 5)
+            test_doc_id, test_doc_vec = test_tup[0], test_tup[1][0]
+            knn_topic = self.run_knn(train_docs_vects, test_doc_vec, 5)
+            test_tup[1][1] = knn_topic
         
