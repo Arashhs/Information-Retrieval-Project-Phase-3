@@ -1,10 +1,11 @@
 import ir_algorithms
+import time
 
 file_name = 'data\\IR00_3_11k News.xlsx'
 unlabeled_dataset = 'data\\IR_Spring2021_ph12_7k.xlsx'
-num_clusters = 30
+num_clusters = 25
 num_inits = 5
-b2_param = 5
+b2_param = 4
 
 def main():
     while(True):
@@ -22,7 +23,10 @@ def main():
         elif option == '2':
             ir_system.load_inverted_index()
             query = input("Enter your query: ")
+            start_time = time.time()
             ir_system.process_query(query)
+            end_time = time.time()
+            print('\nTotal Time:', end_time-start_time, 'seconds')
         elif option == '3':
             ir_system.load_inverted_index()
             ir_system.cluster(num_clusters, num_inits)
@@ -30,7 +34,10 @@ def main():
             ir_system.load_inverted_index()
             ir_system.load_cluster_data()
             query = input("Enter your query: ")
+            start_time = time.time()
             ir_system.process_query_using_clustering(query, b2_param)
+            end_time = time.time()
+            print('\nTotal Time:', end_time-start_time, 'seconds')
         elif option == '5':
             ir_system.load_inverted_index()
             ir_system.classify()
@@ -40,7 +47,10 @@ def main():
         elif option == '7':
             ir_system.load_inverted_index()
             query = input("Enter your query: ")
+            start_time = time.time()
             ir_system.process_query_using_classification(query)
+            end_time = time.time()
+            print('\nTotal Time:', end_time-start_time, 'seconds')
         print('\ndone\n')
 
 
