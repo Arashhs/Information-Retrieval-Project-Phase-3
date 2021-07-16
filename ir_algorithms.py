@@ -984,3 +984,32 @@ class IR:
         self.show_results(top_k)
         return top_k
         
+
+    # initializing documents list by reading a list of excel dataset
+    def merge_documents(self, file_list, dest_filename):
+        print('Fetching documents using Excel file...')
+        doc_count = 0
+        dataset = []
+        for file_name in file_list:
+            wb_obj = openpyxl.load_workbook(file_name)
+            sheet = wb_obj.active
+            headers = []
+            for i, row in enumerate(sheet.iter_rows(values_only=True)):
+                if i == 0:
+                    for header in row:
+                        headers.append(header)
+                else:
+                    doc_count += 1
+                    document = Document(doc_count, row[1], row[2], row[3])
+                    dataset.append(document)
+        print('Fetched all documents')
+        print('Storing merged dataset...')
+        wb = openpyxl.workbook.Workbook()
+        ws1 = wb.active
+        ws1.title = "dataset"
+        ws1.append(headers)
+        for doc in dataset:
+            row = [doc.doc_id, doc.content, doc.topic, doc.url]
+            ws1.append(row)
+        wb.save(filename = dest_filename)
+        return dataset

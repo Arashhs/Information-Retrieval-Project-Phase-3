@@ -1,9 +1,12 @@
 import ir_algorithms
 import time
+from os.path import exists
 
-file_name = 'data\\IR00_3_11k News.xlsx'
+# file_name = 'data\\IR00_3_11k News.xlsx'
+file_name = 'data\\Merged_50k_News.xlsx'
 unlabeled_dataset = 'data\\IR_Spring2021_ph12_7k.xlsx'
-num_clusters = 25
+file_list = ['data\\IR00_3_11k News.xlsx', 'data\\IR00_3_17k News.xlsx', 'data\\IR00_3_20k News.xlsx']
+num_clusters = 20
 num_inits = 5
 b2_param = 4
 
@@ -18,6 +21,8 @@ def main():
         print('7: Run queries using classification technique')
         option = input('Select option: ')
         ir_system = ir_algorithms.IR()
+        if not exists(file_name):
+            ir_system.merge_documents(file_list, file_name)
         if option == '1':
             ir_system.build_inverted_index(file_name)
         elif option == '2':
