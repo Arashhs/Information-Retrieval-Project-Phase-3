@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+data/docs_vectors.pickle filter=lfs diff=lfs merge=lfs -text
+data/index.pickle filter=lfs diff=lfs merge=lfs -text
